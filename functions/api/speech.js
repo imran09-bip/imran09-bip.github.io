@@ -3,14 +3,29 @@
 const SPACE = 'https://kawshikbuet17-bengali-cosyvoice3-tts-demo.hf.space';
 const REF_PATH = '/voice/porosh-reference.wav';
 
+function isAllowedOrigin(origin, requestOrigin) {
+  return !origin || origin === requestOrigin || ['https://localhost', 'http://localhost', 'capacitor://localhost'].includes(origin);
+}
+function corsHeaders(origin, requestOrigin) {
+  return origin && origin !== requestOrigin ? { 'Access-Control-Allow-Origin': origin, 'Vary': 'Origin' } : {};
+}
+export function onRequestOptions({ request }) {
+  const origin = request.headers.get('Origin');
+  const requestOrigin = new URL(request.url).origin;
+  if (!isAllowedOrigin(origin, requestOrigin)) return new Response(null, { status: 403 });
+  return new Response(null, { status: 204, headers: { ...corsHeaders(origin, requestOrigin), 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Max-Age': '86400' } });
+}
+
 export async function onRequestPost({ request }) {
   const origin = request.headers.get('Origin');
   const requestOrigin = new URL(request.url).origin;
-  if (origin && origin !== requestOrigin) return Response.json({ error: 'অননুমোদিত অনুরোধ।' }, { status: 403 });
+  const cors = corsHeaders(origin, requestOrigin);
+  const json = (body, init = {}) => Response.json(body, { ...init, headers: { ...init.headers, ...cors } });
+  if (!isAllowedOrigin(origin, requestOrigin)) return json({ error: 'অননুমোদিত অনুরোধ।' }, { status: 403 });
   let body;
-  try { body = await request.json(); } catch { return Response.json({ error: 'ভয়েসের লেখা পড়া যায়নি।' }, { status: 400 }); }
+  try { body = await request.json(); } catch { return json({ error: 'ভয়েসের লেখা পড়া যায়নি।' }, { status: 400 }); }
   const text = typeof body.text === 'string' ? body.text.trim() : '';
-  if (!text || text.length > 450) return Response.json({ error: 'লেখা খালি অথবা ৪৫০ অক্ষরের বেশি। ছোট অংশে শুনুন।' }, { status: 400 });
+  if (!text || text.length > 450) return json({ error: 'লেখা খালি অথবা ৪৫০ অক্ষরের বেশি। ছোট অংশে শুনুন।' }, { status: 400 });
   try {
     // Upload the owner's fixed 20-second reference clip to the running Gradio Space.
     const refResponse = await fetch(new URL(REF_PATH, request.url));
@@ -44,8 +59,8 @@ export async function onRequestPost({ request }) {
     if (!audioUrl) throw new Error('AI অডিও তৈরি হয়নি। কিছুক্ষণ পর আবার চেষ্টা করুন।');
     const audioResponse = await fetch(audioUrl);
     if (!audioResponse.ok) throw new Error('তৈরি অডিও ডাউনলোড করা যায়নি।');
-    return new Response(audioResponse.body, { headers: { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } });
+    return new Response(audioResponse.body, { headers: { 'Content-Type': 'audio/wav', 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', ...cors } });
   } catch (error) {
-    return Response.json({ error: error?.message || 'বাংলা ভয়েস তৈরি করা যায়নি।' }, { status: 502 });
+    return json({ error: error?.message || 'বাংলা ভয়েস তৈরি করা যায়নি।' }, { status: 502 });
   }
 }
