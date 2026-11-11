@@ -9,6 +9,21 @@ function isAllowedOrigin(origin, requestOrigin) {
 function corsHeaders(origin, requestOrigin) {
   return origin && origin !== requestOrigin ? { 'Access-Control-Allow-Origin': origin, 'Vary': 'Origin' } : {};
 }
+// Gradio has used more than one SSE result shape. Find the produced audio
+// regardless of whether it is nested in data/output arrays or an object.
+function findAudioInfo(value) {
+  if (!value) return null;
+  if (typeof value === 'string') return /\.(wav|mp3|ogg)(\?|$)|\/gradio_api\/file=/i.test(value) ? { url: value } : null;
+  if (Array.isArray(value)) {
+    for (const item of value) { const found = findAudioInfo(item); if (found) return found; }
+    return null;
+  }
+  if (typeof value === 'object') {
+    if (typeof value.url === 'string' || typeof value.path === 'string') return value;
+    for (const key of ['data', 'output', 'result', 'value']) { const found = findAudioInfo(value[key]); if (found) return found; }
+  }
+  return null;
+}
 export function onRequestOptions({ request }) {
   const origin = request.headers.get('Origin');
   const requestOrigin = new URL(request.url).origin;
@@ -50,12 +65,12 @@ export async function onRequestPost({ request }) {
     if (!resultResponse.ok) throw new Error('AI ভয়েসের ফলাফল পাওয়া যায়নি।');
     const stream = await resultResponse.text();
     const dataLines = stream.split('\n').filter(line => line.startsWith('data:'));
-    let result;
+    let audioInfo;
     for (const line of dataLines.reverse()) {
-      try { const parsed = JSON.parse(line.slice(5).trim()); if (Array.isArray(parsed) && parsed.length) { result = parsed; break; } } catch {}
+      try { audioInfo = findAudioInfo(JSON.parse(line.slice(5).trim())); if (audioInfo) break; } catch {}
     }
-    const audioInfo = result?.[0];
-    const audioUrl = audioInfo?.url || (audioInfo?.path ? `${SPACE}/gradio_api/file=${encodeURIComponent(audioInfo.path)}` : null);
+    let audioUrl = audioInfo?.url || (audioInfo?.path ? `${SPACE}/gradio_api/file=${encodeURIComponent(audioInfo.path)}` : null);
+    if (audioUrl && !/^https?:\/\//i.test(audioUrl)) audioUrl = new URL(audioUrl, SPACE).toString();
     if (!audioUrl) throw new Error('AI অডিও তৈরি হয়নি। কিছুক্ষণ পর আবার চেষ্টা করুন।');
     const audioResponse = await fetch(audioUrl);
     if (!audioResponse.ok) throw new Error('তৈরি অডিও ডাউনলোড করা যায়নি।');
