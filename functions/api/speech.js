@@ -55,7 +55,9 @@ export async function onRequestPost({ request }) {
 
     const callResponse = await fetch(`${SPACE}/gradio_api/call/generate_cross_lingual_audio`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ data: [text, { path: filePath, meta: { _type: 'gradio.FileData' } }, 1, 0] })
+      // The Space inputs are: text, reference audio, seed, then speed.
+      // A speed of 0 is invalid and causes it to return no generated audio.
+      body: JSON.stringify({ data: [text, { path: filePath, meta: { _type: 'gradio.FileData' } }, 0, 1.0] })
     });
     if (!callResponse.ok) throw new Error('AI ভয়েস তৈরি শুরু করা যায়নি।');
     const callData = await callResponse.json();
