@@ -64,6 +64,7 @@ const U={ti:['নামায সহায়ক','Namaz Companion'],gr:['আস
 Object.assign(U,{az:['আজানের অডিও বাছুন','Choose azan audio'],ar:['আজান ফাইল সেট আছে (বদলাতে চাপুন)','Azan file is set (tap to change)'],ap:['পরীক্ষা','Test'],an:['ফোনে আজানের অডিও ফাইল থাকলে এখান থেকে বাছুন। না বাছলে সাধারণ বিপ শব্দ বাজবে।','Pick an azan audio file from your phone. Without one, a simple beep plays.'],wl:['স্ক্রিন জাগিয়ে রাখুন','Keep screen awake'],wn:['রিমাইন্ডারের জন্য পেজটি খোলা রেখে স্ক্রিন জাগিয়ে রাখুন। নইলে ফোন ব্যাকগ্রাউন্ডে বাজাতে নাও দিতে পারে।','Keep the page open with the screen awake, otherwise the phone may not let it ring from the background.']});
 const u=k=>t(U[k]);
 const ST=[
+['নিয়ত: নিয়ত মূলত অন্তরের ইচ্ছা। কিবলামুখী হয়ে আল্লাহর সন্তুষ্টির জন্য যে ওয়াক্তের নামাজ পড়বেন, সেটি আদায়ের ইচ্ছা করুন। মুখে বলার জন্য আলাদা কোনো নির্দিষ্ট দোয়া জরুরি নয়।','Niyyah is the intention in the heart. Face the Qibla and intend the prayer you are about to offer for Allah.'],
 ['নিয়ত: ওয়াক্ত ও রাকাত মনে মনে ঠিক করে কিবলামুখী দাঁড়ান। ওজু আগেই করে নিন।','Intention: decide the prayer in your heart, face the Qibla. Have wudu first.'],
 ['তাকবিরে তাহরিমা: “আল্লাহু আকবার” বলে দুই হাত কান পর্যন্ত তুলুন, তারপর নাভির নিচে ডান হাত বাঁ হাতের ওপর রাখুন।','Takbir: say “Allahu Akbar”, raise hands to the ears, then fold them below the navel, right over left.'],
 ['সানা পড়ুন, তারপর “আউযুবিল্লাহি মিনাশ শাইতানির রাজিম, বিসমিল্লাহির রাহমানির রাহিম” পড়ুন।','Recite Sana, then the Ta’awwudh and Bismillah.'],
@@ -129,12 +130,19 @@ const QURAN_LIST=LAST20.slice(0,20); const FAZILAT_SURAHS=LAST20.slice(20);
 function jsq(v){return "'" + String(v).replaceAll("\\", "\\\\").replaceAll("'", "\\'").replaceAll("\n", " ") + "'";}
 function speakRakats(){const text=RAKATS.map(x=>x[0]+': '+[x[2],x[3],x[4],x[5],x[6]].filter(v=>v!=='—').join(', ')).join('। ');speakText(text,'bn-BD')}
 let activeBanglaAudio=null, activeBanglaAudioUrl=null;
-const VOICE_DB='namaz-bangla-voice-cache-v2', VOICE_STORE='clips';
-function openVoiceDB(){return new Promise((resolve,reject)=>{const req=indexedDB.open(VOICE_DB,1);req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains(VOICE_STORE))db.createObjectStore(VOICE_STORE,{keyPath:'key'})};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
+const VOICE_DB='namaz-bangla-voice-cache-v3', VOICE_STORE='clips', QURAN_AUDIO_STORE='quran-audio';
+// Bundled clips are part of the APK and never need internet.
+const OFFLINE_VOICE={bismillah:'voice/offline/bismillah.wav',welcome:'voice/offline/welcome.wav'};
+function openVoiceDB(){return new Promise((resolve,reject)=>{const req=indexedDB.open(VOICE_DB,2);req.onupgradeneeded=()=>{const db=req.result;if(!db.objectStoreNames.contains(VOICE_STORE))db.createObjectStore(VOICE_STORE,{keyPath:'key'});if(!db.objectStoreNames.contains(QURAN_AUDIO_STORE))db.createObjectStore(QURAN_AUDIO_STORE,{keyPath:'key'})};req.onsuccess=()=>resolve(req.result);req.onerror=()=>reject(req.error)})}
 async function voiceCacheKey(text){const bytes=new TextEncoder().encode('Porosh-CosyVoice3|'+text);const hash=await crypto.subtle.digest('SHA-256',bytes);return [...new Uint8Array(hash)].map(x=>x.toString(16).padStart(2,'0')).join('')}
 async function getSavedVoice(key){const db=await openVoiceDB();return new Promise((resolve,reject)=>{const tx=db.transaction(VOICE_STORE,'readonly'),r=tx.objectStore(VOICE_STORE).get(key);r.onsuccess=()=>resolve(r.result?.blob||null);r.onerror=()=>reject(r.error);tx.oncomplete=()=>db.close()})}
 async function saveVoice(key,blob){const db=await openVoiceDB();return new Promise((resolve,reject)=>{const tx=db.transaction(VOICE_STORE,'readwrite');tx.objectStore(VOICE_STORE).put({key,blob,savedAt:Date.now()});tx.oncomplete=()=>{db.close();resolve()};tx.onerror=()=>{db.close();reject(tx.error)}})}
-async function playBanglaBlob(blob){if(activeBanglaAudio){activeBanglaAudio.pause();activeBanglaAudio=null}if(activeBanglaAudioUrl)URL.revokeObjectURL(activeBanglaAudioUrl);activeBanglaAudioUrl=URL.createObjectURL(blob);activeBanglaAudio=new Audio(activeBanglaAudioUrl);activeBanglaAudio.onended=()=>{if(activeBanglaAudioUrl)URL.revokeObjectURL(activeBanglaAudioUrl);activeBanglaAudioUrl=null;activeBanglaAudio=null};await activeBanglaAudio.play()}
+async function getSavedQuranAudio(key){const db=await openVoiceDB();return new Promise((resolve,reject)=>{const tx=db.transaction(QURAN_AUDIO_STORE,'readonly'),r=tx.objectStore(QURAN_AUDIO_STORE).get(key);r.onsuccess=()=>resolve(r.result?.blob||null);r.onerror=()=>reject(r.error);tx.oncomplete=()=>db.close()})}
+async function saveQuranAudio(key,blob){const db=await openVoiceDB();return new Promise((resolve,reject)=>{const tx=db.transaction(QURAN_AUDIO_STORE,'readwrite');tx.objectStore(QURAN_AUDIO_STORE).put({key,blob,savedAt:Date.now()});tx.oncomplete=()=>{db.close();resolve()};tx.onerror=()=>{db.close();reject(tx.error)}})}
+async function playBanglaBlob(blob){if(activeBanglaAudio){activeBanglaAudio.pause();activeBanglaAudio=null}if(activeBanglaAudioUrl)URL.revokeObjectURL(activeBanglaAudioUrl);activeBanglaAudioUrl=URL.createObjectURL(blob);activeBanglaAudio=new Audio(activeBanglaAudioUrl);const clear=()=>{if(activeBanglaAudioUrl)URL.revokeObjectURL(activeBanglaAudioUrl);activeBanglaAudioUrl=null;activeBanglaAudio=null};activeBanglaAudio.onended=clear;activeBanglaAudio.onerror=clear;await activeBanglaAudio.play()}
+async function playBundledVoice(name){const a=new Audio(OFFLINE_VOICE[name]);a.preload='auto';await a.play()}
+function offerWelcomeButton(){if(document.getElementById('welcome-audio'))return;const b=document.createElement('button');b.id='welcome-audio';b.className='voice';b.textContent='▶ স্বাগতম বার্তা শুনুন';b.style.cssText+=';position:fixed;right:14px;bottom:16px;z-index:30;background:var(--card)';b.onclick=()=>{playBundledVoice('welcome').then(()=>b.remove()).catch(()=>alert('স্বাগতম অডিও চালু করা যায়নি।'))};document.body.appendChild(b)}
+function playWelcome(){return playBundledVoice('welcome')}
 function browserSpeak(text){
   return new Promise((resolve,reject)=>{
     if(!('speechSynthesis' in window)) return reject(new Error('এই ব্রাউজারে বাংলা ভয়েস সুবিধা নেই।'));
@@ -147,34 +155,21 @@ function browserSpeak(text){
 }
 async function speakText(text,locale='bn-BD'){
   const clean=String(text||'').trim(); if(!clean)return;
-  if(!/^bn/i.test(locale)){alert('আরবি তিলাওয়াত শুনতে “আরবি তিলাওয়াত” বাটন ব্যবহার করুন।');return}
   try{
     const key=await voiceCacheKey(clean);
     let blob=null; try{blob=await getSavedVoice(key)}catch(e){}
     if(blob){await playBanglaBlob(blob);return}
-    if(navigator.onLine){
-      // Cloudflare Pages Function: server-side proxy avoids browser CORS restrictions.
-      try{
-        const response=await fetch('api/speech',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({text:clean})});
-        if(response.ok){
-          blob=await response.blob();
-          if(blob.size){try{await saveVoice(key,blob)}catch(e){} await playBanglaBlob(blob);return;}
-        }
-        let msg='নিজস্ব AI ভয়েস সার্ভার সাড়া দেয়নি।';
-        try{const j=await response.json();if(j.error)msg=j.error}catch(e){}
-        console.warn(msg);
-      }catch(e){console.warn('AI voice proxy unavailable',e)}
-    }
-    // Fallback: Android/Chrome built-in Bengali TTS, so the button still works.
+    // No online AI request: this version stays usable without internet.
     await browserSpeak(clean);
-    if(!navigator.onLine) alert('অফলাইনে সংরক্ষিত নিজের কণ্ঠ পাওয়া যায়নি; ফোনের বাংলা ভয়েস ব্যবহার করা হয়েছে।');
+    if(!navigator.onLine) alert('এই অংশের নিজের-কণ্ঠের অডিও এখনও অ্যাপে যোগ করা হয়নি; ফোনের বাংলা voice ব্যবহার করা হয়েছে।');
   }catch(e){console.error('Bangla voice error',e);alert((e.message||'বাংলা ভয়েস চালু করা যায়নি।')+' ফোনের Text-to-speech সেটিংসে বাংলা ভয়েস ইনস্টল করুন।')}
 }
 async function quranData(id){const key='quran-surah-'+id;try{const cached=localStorage.getItem(key);if(cached)return JSON.parse(cached)}catch(e){}const r=await fetch(`https://api.alquran.cloud/v1/surah/${id}/editions/quran-uthmani,bn.bengali,en.transliteration`);if(!r.ok)throw Error('network');const j=await r.json();if(j.code!==200)throw Error('api');try{localStorage.setItem(key,JSON.stringify(j.data))}catch(e){}return j.data}
 async function loadSurah(id){const box=document.getElementById('quran-detail');if(!box)return;box.innerHTML='<p>সূরা লোড হচ্ছে…</p>';try{const data=await quranData(id),ar=data[0].ayahs,bn=data[1].ayahs,tr=data[2].ayahs;let html=`<h3>${data[0].name} — ${data[0].englishName}</h3><button class="voice" onclick="playSurahAudio(${id})">▶ আরবি তিলাওয়াত শুনুন</button><button class="voice" onclick="speakText(${jsq(bn.map(x=>x.text).join('। '))},'bn-BD')">🔊 সম্পূর্ণ বাংলা অর্থ শুনুন</button>`;for(let i=0;i<ar.length;i++){html+=`<div class="c"><div class="ar">${ar[i].text}</div><div class="pr">${tr[i]?.text||''}</div><div>${bn[i]?.text||''}</div><button class="voice" onclick="speakText(${jsq(bn[i]?.text||'')},'bn-BD')">🔊 এই আয়াতের বাংলা অর্থ শুনুন</button></div>`}box.innerHTML=html;box.scrollIntoView({behavior:'smooth',block:'start'})}catch(e){box.innerHTML='<p>সূরা আনতে ইন্টারনেট সংযোগ প্রয়োজন। একবার লোড হলে এই ডিভাইসে ক্যাশ থাকবে।</p>'}}
-function playSurahAudio(id){const a=new Audio(`https://cdn.islamic.network/quran/audio-surah/128/ar.alafasy/${id}.mp3`);a.play().catch(()=>alert('অডিও চালাতে ইন্টারনেট বা মিডিয়া অনুমতি প্রয়োজন।'))}
+async function playRemoteAudio(url,key){try{let blob=await getSavedQuranAudio(key);if(!blob){if(!navigator.onLine)throw Error('offline');const r=await fetch(url);if(!r.ok)throw Error('download');blob=await r.blob();if(blob.size>256&&/^audio\//i.test(blob.type||'')){try{await saveQuranAudio(key,blob);if(navigator.storage?.persist)navigator.storage.persist().catch(()=>{})}catch(e){}}}await playBanglaBlob(blob)}catch(e){if(navigator.onLine){const a=new Audio(url);a.play().catch(()=>alert('অডিও চালাতে ইন্টারনেট বা মিডিয়া অনুমতি প্রয়োজন।'))}else alert('এই অডিওটি আগে ডাউনলোড করা হয়নি, তাই অফলাইনে চলবে না।')}}
+function playSurahAudio(id){return playRemoteAudio(`https://cdn.islamic.network/quran/audio-surah/128/ar.alafasy/${id}.mp3`,'surah-'+id)}
 async function loadAyatKursi(){const box=document.getElementById('quran-detail');if(!box)return;box.innerHTML='<p>আয়াত লোড হচ্ছে…</p>';try{const r=await fetch('https://api.alquran.cloud/v1/ayah/2:255/editions/quran-uthmani,bn.bengali,en.transliteration');const j=await r.json();if(j.code!==200)throw Error('api');const [ar,bn,tr]=j.data;box.innerHTML=`<h3>আয়াতুল কুরসি — সূরা আল-বাকারা ২:২৫৫</h3><div class="ar">${ar.text}</div><div class="pr">${tr.text}</div><div>${bn.text}</div><button class="voice" onclick="playAyahAudio()">▶ আরবি তিলাওয়াত শুনুন</button><button class="voice" onclick="speakText(${jsq('আয়াতুল কুরসি। ')}+${'${jsq(bn.text)}'},'bn-BD')">🔊 বাংলা অর্থ শুনুন</button>`}catch(e){box.textContent='আয়াত আনতে ইন্টারনেট সংযোগ প্রয়োজন।'}}
-function playAyahAudio(){const a=new Audio('https://cdn.islamic.network/quran/audio/128/ar.alafasy/262.mp3');a.play().catch(()=>alert('অডিও চালাতে ইন্টারনেট প্রয়োজন।'))}
+function playAyahAudio(){return playRemoteAudio('https://cdn.islamic.network/quran/audio/128/ar.alafasy/262.mp3','ayah-262')}
 function calc(){
 const now=new Date(Date.now()+216e5),base=Date.UTC(now.getUTCFullYear(),now.getUTCMonth(),now.getUTCDate());
 const la=customLoc?customLoc.lat:C[city][2],lo=customLoc?customLoc.lon:C[city][3],r=Math.PI/180,s=x=>Math.sin(x*r),c=x=>Math.cos(x*r),f=x=>((x%360)+360)%360;
@@ -226,8 +221,11 @@ h+=`<div class="big"><div>${u('nx')}: <span id="nm"></span></div><b id="cd">--</
 if(tab==1){h+=`<div class="c"><h3>প্রতি ওয়াক্তের নামাযের রাকাত</h3><p class="note">হানাফি পদ্ধতির প্রচলিত বিন্যাস। ব্যক্তিগত আমল/মসজিদের শিক্ষার ক্ষেত্রে আলেমের নির্দেশনা অনুসরণ করুন।</p><button class="voice" onclick="speakRakats()">🔊 রাকাতের তালিকা শুনুন</button><table class="rakatgrid"><tr><th>ওয়াক্ত</th><th>আগের সুন্নত</th><th>ফরজ</th><th>পরের সুন্নত</th><th>নফল</th><th>বিতর</th><th>মোট</th></tr>${RAKATS.map(x=>`<tr><td>${lang==='bn'?x[0]:x[1]}</td><td>${x[2]}</td><td>${x[3]}</td><td>${x[4]}</td><td>${x[5]}</td><td>${x[6]}</td><td>${x[7]}</td></tr>`).join('')}</table><p class="note">পাঁচ ওয়াক্তে মোট ফরজ ১৭ রাকাত। এশার ৩ রাকাত বিতর হানাফি মতে ওয়াজিব। এশার নফল ২ রাকাত সুন্নতের আগে এবং ২ রাকাত বিতরের পরে দেখানো হয়েছে।</p></div><div class="c"><h3>${u('sh')}</h3><ol>${ST.map((x,i)=>`<li>${t(x)}<br><button class="voice" onclick="speakText(${jsq(t(x))},lang==='bn'?'bn-BD':'en')">🔊 শুনুন</button></li>`).join('')}</ol></div><div class="c"><h3>নামাযের গুরুত্বপূর্ণ বিষয়</h3><p>ফরজ, ওয়াজিব, সুন্নতে মুয়াক্কাদা, সুন্নতে গায়রে মুয়াক্কাদা ও নফল—এগুলোর বিধান এক নয়। নামাযের ভুল-শুদ্ধ, সাহু সিজদা, মুসাফিরের নামায ও নারীদের বিশেষ মাসআলা আলাদা করে নির্ভরযোগ্য আলেমের কাছে শিখুন।</p><button class="voice" onclick="speakText('নামাযের ফরজ সতেরো রাকাত। এশার তিন রাকাত বিতর হানাফি মতে ওয়াজিব।','bn-BD')">🔊 শুনুন</button></div>`}
 if(tab==3){h+=X.map(g=>`<div class="c"><h3>${t(g[0])}</h3><ol>${g[1].map(x=>`<li>${t(x)}<br><button class=\"voice\" onclick=\"speakText(${jsq(t(x))},lang==='bn'?'bn-BD':'en')\">🔊 শুনুন</button></li>`).join('')}</ol></div>`).join('')+`<p class="note">${u('ns')}</p>`}
 if(tab==2){h+=`<div class="c"><h3>১. প্রথম সূরা — সূরা আল-ফাতিহা</h3><p class="note">প্রথমেই সূরা ফাতিহা। এরপর নিচে সূরা আন-নাস থেকে ধারাবাহিক ২০টি ছোট সূরা সাজানো হয়েছে।</p><button class="voice" onclick="loadSurah(1)">সূরা আল-ফাতিহা খুলুন</button></div><div class="c"><h3>২. ছোট ২০টি সূরা (আন-নাস থেকে আত-তিন)</h3><p class="note">প্রতিটি সূরায় আরবি কুরআন, বাংলা অর্থ, আরবি তিলাওয়াত এবং বাংলা অর্থ শোনার আলাদা ব্যবস্থা।</p><div id="quran-list">${QURAN_LIST.map(q=>`<button class="voice" onclick="loadSurah(${q.id})">${q.name}</button>`).join('')}</div><div id="quran-detail"></div></div><div class="c"><h3>৩. ফজিলতপূর্ণ ও নির্বাচিত বড় সূরা</h3><p class="note">সূরা আল-কাহফ, ইয়াসিন, আর-রহমান, আল-ওয়াকিয়াহ, আল-মুলক, আলে ইমরান ও আস-সাজদাহ। ফজিলত সম্পর্কে সহিহ সূত্রভিত্তিক ব্যাখ্যা আলেমের কাছ থেকে যাচাই করুন।</p>${FAZILAT_SURAHS.map(q=>`<button class="voice" onclick="loadSurah(${q.id})">${q.name}</button>`).join('')}<button class="voice" onclick="loadAyatKursi()">আয়াতুল কুরসি</button></div>`+S.map((x,i)=>`<div class="c"><h3>${t(x[0])}</h3><div class="ar">${x[1]}</div><div class="pr">${x[2]}</div><div class="mn">${t(x[3])}</div><button class="voice" onclick="speakText(${jsq(x[2])},'bn-BD')">🔊 বাংলা উচ্চারণ শুনুন</button><button class="voice" onclick="speakText(${jsq(x[3][0])},'bn-BD')">🔊 বাংলা অর্থ শুনুন</button></div>`).join('')}
-document.getElementById('app').innerHTML=h;tick()}
+document.getElementById('app').innerHTML=h;if(tab===2){const first=document.querySelector('#app .c');if(first){const b=document.createElement('button');b.className='voice';b.textContent='▶ নিজের কণ্ঠে অফলাইন অডিও';b.onclick=()=>playBundledVoice('bismillah').catch(()=>alert('অফলাইন অডিও চালু করা যায়নি।'));first.appendChild(b)}}tick()}
 render();loadAz();
+// Android is configured to allow this bundled welcome clip on launch. Browsers
+// that block autoplay show a single tap button instead.
+addEventListener('load',()=>setTimeout(()=>playWelcome().catch(offerWelcomeButton),500));
 let liveTimer=null;
 function updateWallClock(){
   const clock=document.getElementById('clock'); if(!clock)return;
@@ -254,5 +252,5 @@ window.addEventListener('pageshow',startLiveClock);
 window.addEventListener('focus',()=>{if(!liveTimer)startLiveClock()});
 
 </script>
-<script>if("serviceWorker"in navigator)addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}))</script>
+<script>if(!IS_NATIVE_APP&&"serviceWorker"in navigator)addEventListener("load",()=>navigator.serviceWorker.register("sw.js").catch(()=>{}))</script>
 </body></html>
